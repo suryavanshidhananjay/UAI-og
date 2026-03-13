@@ -18,6 +18,7 @@ import re
 import string
 import time
 import socket
+import threading
 from collections import Counter
 import io
 
@@ -44,7 +45,6 @@ from styles import (
 from modules.system import (
     assess_process_risk,
     calculate_health_score,
-    enable_firewall,
     get_active_connections,
     get_bandwidth_stats,
     get_firewall_status,
@@ -55,6 +55,13 @@ from modules.system import (
     get_process_info,
     get_process_list,
     get_system_info,
+)
+from modules.remediation import (
+    enable_firewall,
+    close_risky_ports,
+    flush_dns_cache,
+    block_ip,
+    check_admin,
 )
 from modules.advisor import generate_intelligence_report, get_ai_summary
 from modules.network import scan_network, get_local_subnet
@@ -76,6 +83,7 @@ from modules.vault import (
     create_baseline,
     monitor_changes,
 )
+from modules.canary import start_canary, breach_flag, breach_info
 
 
 # ══════════════════════════════════════════════════════════════
@@ -114,6 +122,10 @@ if "vault_last_diff" not in st.session_state:
     st.session_state.vault_last_diff = {"modified": [], "added": [], "removed": []}
 if "ai_console_last" not in st.session_state:
     st.session_state.ai_console_last = ""
+if "refresh_ms" not in st.session_state:
+    st.session_state.refresh_ms = 5000  # Default 5s auto-refresh cadence
+if "auto_refresh_enabled" not in st.session_state:
+    st.session_state.auto_refresh_enabled = True
 
 
 # ══════════════════════════════════════════════════════════════
@@ -437,26 +449,33 @@ def render_overview():
 
     if harden_clicked:
         status_area = st.empty()
-        progress = st.progress(0, text="Initializing defensive sequence...")
-        steps = [
-            "Closing insecure ports...",
-            "Enabling Firewall...",
-            "Flushing DNS Cache...",
-        ]
-        firewall_result = False
-        for idx, step in enumerate(steps, start=1):
-            progress.progress(int(idx / len(steps) * 100), text=step)
-            if "Firewall" in step:
-                firewall_result = enable_firewall()
-            # Lightweight pause keeps animation visible without blocking too long.
-            time.sleep(0.6)
-        progress.progress(100, text="Defense sequence complete")
-        if firewall_result:
-            status_area.success("Firewall enforced. Ports hardened. DNS cache refreshed.")
-            log_event("DEFENSE", "Active Defense: firewall enabled", "INFO")
+        console = st.empty()
+
+        if not check_admin():
+            status_area.warning("Admin rights required for hardening actions.")
+            log_event("DEFENSE", "Hardening blocked: admin required", "WARNING")
         else:
-            status_area.warning("Defense ran, but firewall toggle may require elevation.")
-            log_event("DEFENSE", "Active Defense attempted (firewall toggle may have failed)", "WARNING")
+            status_area.info("Executing hardening steps...")
+            outputs = []
+
+            fw = enable_firewall()
+            outputs.append(f"Firewall: {'OK' if fw else 'FAILED'} — {fw.stdout or fw.stderr or 'no output'}")
+            log_event("DEFENSE", fw.stdout or fw.stderr or "Firewall command executed")
+
+            ports = close_risky_ports()
+            outputs.append(f"Close risky ports: {'OK' if ports else 'FAILED'} — {ports.stdout or ports.stderr or 'no output'}")
+            log_event("DEFENSE", ports.stdout or ports.stderr or "Port close command executed")
+
+            dns = flush_dns_cache()
+            outputs.append(f"Flush DNS: {'OK' if dns else 'FAILED'} — {dns.stdout or dns.stderr or 'no output'}")
+            log_event("DEFENSE", dns.stdout or dns.stderr or "DNS flush executed")
+
+            console.markdown("\n".join(f"- {line}" for line in outputs))
+
+            if fw and ports and dns:
+                status_area.success("Firewall enforced, risky ports blocked, DNS cache flushed.")
+            else:
+                status_area.warning("Hardening completed with errors. See console output.")
 
     neon_divider()
     
@@ -473,31 +492,34 @@ def render_overview():
         if brute_force_alert:
             warning_html = '<div style="color:#f97316;font-weight:700;margin-top:8px;">CRITICAL: Brute Force Attempt Detected!</div>'
         shield_frame_style = f"border:2px solid {risk_theme['color']}; box-shadow:{risk_theme['glow']}; {risk_theme['flash']}"
-        shield_html = textwrap.dedent(f"""
-        <style>
-        @keyframes pulseShield {{
-            0% {{ box-shadow: 0 0 16px rgba(239, 68, 68, 0.35); }}
-            50% {{ box-shadow: 0 0 30px rgba(239, 68, 68, 0.65); }}
-            100% {{ box-shadow: 0 0 16px rgba(239, 68, 68, 0.35); }}
-        }}
-        </style>
-        <div class="cyber-card" style="{shield_frame_style}">
-            <div class="cyber-card-header">
-                <div class="cyber-card-title">Shield Score</div>
-                <span class="cyber-card-badge {badge_class}">{badge_text}</span>
-            </div>
-            <div style="color:#64748b;font-size:0.85rem;margin-bottom:16px;">Risk Level: <span style="color:{risk_theme['color']};font-weight:700;">{risk_level}</span></div>
-            <div style="padding:4px;border-radius:12px;border:1px solid {risk_theme['color']};box-shadow:{risk_theme['glow']};">
-                {security_score_donut(health_score, safe_pct, warn_pct, crit_pct)}
-            </div>
-            {warning_html}
-        </div>
-        """)
+        shield_html = f"""
+<style>
+@keyframes pulseShield {{
+    0% {{ box-shadow: 0 0 16px rgba(239, 68, 68, 0.35); }}
+    50% {{ box-shadow: 0 0 30px rgba(239, 68, 68, 0.65); }}
+    100% {{ box-shadow: 0 0 16px rgba(239, 68, 68, 0.35); }}
+}}
+</style>
+<div class="cyber-card" style="{shield_frame_style}">
+    <div class="cyber-card-header">
+        <div class="cyber-card-title">Shield Score</div>
+        <span class="cyber-card-badge {badge_class}">{badge_text}</span>
+    </div>
+    <div style="color:#64748b;font-size:0.85rem;margin-bottom:16px;">Risk Level: <span style="color:{risk_theme['color']};font-weight:700;">{risk_level}</span></div>
+    <div style="padding:4px;border-radius:12px;border:1px solid {risk_theme['color']};box-shadow:{risk_theme['glow']};">
+        {security_score_donut(health_score, safe_pct, warn_pct, crit_pct)}
+    </div>
+    {warning_html}
+</div>
+        """
         st.markdown(shield_html, unsafe_allow_html=True)
     
     with col2:
-        # Real bandwidth stats
         bw = get_bandwidth_stats()
+        total_mb = max(bw["bytes_sent_mb"] + bw["bytes_recv_mb"], 1)
+        inbound_pct = min(100, int((bw["bytes_recv_mb"] / total_mb) * 100))
+        outbound_pct = min(100, int((bw["bytes_sent_mb"] / total_mb) * 100))
+
         net_html = textwrap.dedent(f"""
         <div class="cyber-card">
             <div class="cyber-card-header">
@@ -507,22 +529,24 @@ def render_overview():
                     <span><span style="color:#22c55e;">●</span> Outbound</span>
                 </div>
             </div>
-            <div style="color:#64748b;font-size:0.85rem;margin-bottom:16px;">
+            <div style="color:#64748b;font-size:0.85rem;margin-bottom:12px;">
                 Bytes Sent: {bw["bytes_sent_mb"]} MB | Received: {bw["bytes_recv_mb"]} MB
             </div>
-            <div style="height:100px;display:flex;align-items:flex-end;gap:4px;padding:20px 0;">
-                <div style="flex:1;height:20%;background:linear-gradient(180deg,#22d3ee,#0891b2);border-radius:2px;"></div>
-                <div style="flex:1;height:15%;background:linear-gradient(180deg,#22d3ee,#0891b2);border-radius:2px;"></div>
-                <div style="flex:1;height:25%;background:linear-gradient(180deg,#22d3ee,#0891b2);border-radius:2px;"></div>
-                <div style="flex:1;height:30%;background:linear-gradient(180deg,#22d3ee,#0891b2);border-radius:2px;"></div>
-                <div style="flex:1;height:45%;background:linear-gradient(180deg,#22d3ee,#0891b2);border-radius:2px;"></div>
-                <div style="flex:1;height:60%;background:linear-gradient(180deg,#22d3ee,#0891b2);border-radius:2px;"></div>
-                <div style="flex:1;height:55%;background:linear-gradient(180deg,#22d3ee,#0891b2);border-radius:2px;"></div>
-                <div style="flex:1;height:70%;background:linear-gradient(180deg,#22d3ee,#0891b2);border-radius:2px;"></div>
-                <div style="flex:1;height:85%;background:linear-gradient(180deg,#22d3ee,#0891b2);border-radius:2px;"></div>
-                <div style="flex:1;height:90%;background:linear-gradient(180deg,#22d3ee,#0891b2);border-radius:2px;"></div>
-                <div style="flex:1;height:95%;background:linear-gradient(180deg,#22d3ee,#0891b2);border-radius:2px;"></div>
-                <div style="flex:1;height:100%;background:linear-gradient(180deg,#22d3ee,#0891b2);border-radius:2px;"></div>
+            <div style="display:flex;flex-direction:column;gap:10px;">
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <span style="width:70px;color:#22d3ee;font-size:0.85rem;">Inbound</span>
+                    <div style="flex:1;height:10px;background:#0f172a;border-radius:6px;overflow:hidden;">
+                        <div style="width:{inbound_pct}%;height:100%;background:linear-gradient(90deg,#22d3ee,#0ea5e9);"></div>
+                    </div>
+                    <span style="width:48px;text-align:right;color:#94a3b8;font-size:0.85rem;">{inbound_pct}%</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <span style="width:70px;color:#22c55e;font-size:0.85rem;">Outbound</span>
+                    <div style="flex:1;height:10px;background:#0f172a;border-radius:6px;overflow:hidden;">
+                        <div style="width:{outbound_pct}%;height:100%;background:linear-gradient(90deg,#22c55e,#16a34a);"></div>
+                    </div>
+                    <span style="width:48px;text-align:right;color:#94a3b8;font-size:0.85rem;">{outbound_pct}%</span>
+                </div>
             </div>
         </div>
         """)
@@ -637,12 +661,24 @@ def render_overview():
         ''', unsafe_allow_html=True)
     
     with c6:
-        checks_passed = 18 if health_score >= 70 else 15 if health_score >= 50 else 10
+        checks = [
+            ("Firewall enabled", firewall_enabled),
+            ("No high-risk ports", len(_high_risk_ports) == 0),
+            ("CPU under 90%", cpu < 90),
+            ("Memory under 90%", mem < 90),
+            ("Disk under 90%", disk_pct < 90),
+            ("Vault clean", modified_files == 0),
+            ("No failed logins", failed_logins == 0),
+            ("No brute force alert", not brute_force_alert),
+        ]
+        checks_passed = sum(1 for _label, ok in checks if ok)
+        checks_total = len(checks)
+
         st.markdown(f'''
             <div class="summary-card">
                 <div class="summary-icon summary-icon-green">⚙️</div>
                 <div class="summary-stat summary-stat-green">Hardened</div>
-                <div class="summary-desc">{checks_passed}/20 checks passed</div>
+                <div class="summary-desc">{checks_passed}/{checks_total} checks passed</div>
                 <div class="summary-label">System Config</div>
             </div>
         ''', unsafe_allow_html=True)
@@ -698,6 +734,14 @@ def render_overview():
     </div>
     """)
     st.markdown(alerts_block, unsafe_allow_html=True)
+
+    # System Log tail
+    st.markdown("<div class='cyber-card-title' style='margin-top:16px;'>📝 System Log</div>", unsafe_allow_html=True)
+    df_log = get_event_log()
+    if not df_log.empty:
+        st.dataframe(df_log.tail(20).iloc[::-1].reset_index(drop=True), use_container_width=True, height=260)
+    else:
+        st.info("No system log entries yet.")
     
     log_event("SCAN", "Dashboard overview loaded")
 
@@ -1791,57 +1835,106 @@ def render_auth_logs():
 # ══════════════════════════════════════════════════════════════
 
 def main():
+    # Apply custom CSS from styles.py (includes navigation fixes)
     apply_styles()
+
+    # Start the background canary observer once per session.
+    if "canary_started" not in st.session_state:
+        thread = threading.Thread(target=start_canary, daemon=True)
+        thread.start()
+        st.session_state.canary_started = True
+        st.session_state.last_breach_seen = None
+
+    # Immediate breach override: if tripwire fired, take over UI.
+    if breach_flag():
+        info = breach_info()
+        breach_sig = info.get("timestamp")
+        if breach_sig and st.session_state.get("last_breach_seen") != breach_sig:
+            st.session_state.last_breach_seen = breach_sig
+            log_event(
+                "BREACH",
+                f"Canary triggered at {info.get('path')} by PIDs {info.get('pids')} ({info.get('names')})",
+                "CRITICAL",
+            )
+
+        st.markdown(
+            f"""
+            <div style="background:#7f1d1d;color:#fee2e2;padding:40px;border-radius:16px;border:2px solid #f87171;min-height:90vh;display:flex;flex-direction:column;justify-content:center;align-items:center;">
+                <div style="font-size:2rem;font-weight:800;margin-bottom:16px;">⚠️ CRITICAL BREACH: Unauthorized access to Honeypot detected.</div>
+                <div style="font-size:1rem;margin-bottom:12px;">Action Taken: Process {info.get('names','unknown')} (PID {info.get('pids','?')}) terminated; network isolated.</div>
+                <div style="font-size:0.95rem;color:#fecdd3;">Tripwire file: {info.get('path')}</div>
+                <div style="font-size:0.95rem;color:#fecdd3;">Timestamp: {info.get('timestamp')}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        # Early exit to lock the screen on breach.
+        return
+
+    # Global live auto-refresh (keeps telemetry and AI console up-to-date) using a lightweight JS reload for broad Streamlit compatibility.
+    if st.session_state.get("auto_refresh_enabled", True):
+        refresh_ms = st.session_state.get("refresh_ms", 5000)
+        # Inject a safe client-side reload timer; avoids dependency on st.autorefresh (not available in this Streamlit build).
+        st.markdown(
+            f"""
+            <script>
+                const cgTimer = setTimeout(() => {{ window.location.reload(); }}, {refresh_ms});
+            </script>
+            """,
+            unsafe_allow_html=True,
+        )
     
     # Sidebar
     with st.sidebar:
         # Logo and branding
         st.markdown('''
-            <div style="padding:20px 16px 16px 16px;">
-                <div style="display:flex;align-items:center;gap:12px;">
-                    <div style="width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#0891b2,#22d3ee);display:flex;align-items:center;justify-content:center;font-size:1.2rem;">🔒</div>
-                    <div>
-                        <div style="color:#e2e8f0;font-weight:700;font-size:1.1rem;">CYBERGUARD</div>
-                        <div style="color:#64748b;font-size:0.75rem;">v2.4.1 — Local Monitor</div>
-                    </div>
+            <div class="cg-brand-wrap">
+                <div class="cg-brand-icon">🛡</div>
+                <div>
+                    <div class="cg-brand-title">CYBERGUARD</div>
+                    <div class="cg-brand-subtitle">v2.4.1 — Local Monitor</div>
                 </div>
             </div>
         ''', unsafe_allow_html=True)
-        
-        # System status badge
+
         st.markdown(f'''
-            <div class="system-status">
-                <div class="status-dot"></div>
-                <span class="status-text">System Protected</span>
-                <span class="status-time">{get_time_only()}</span>
+            <div class="cg-system-status">
+                <div class="cg-status-left">
+                    <div class="cg-status-dot"></div>
+                    <span class="cg-status-text">System Protected</span>
+                </div>
+                <span class="cg-status-time">{get_time_only()}</span>
             </div>
         ''', unsafe_allow_html=True)
-        
+
         neon_divider()
-        
-        # Navigation
+
+        # Navigation label
+        st.markdown('<div class="cg-nav-label">NAVIGATION</div>', unsafe_allow_html=True)
+
         page = st.radio(
             "Navigation",
             options=[
-                "📊 Overview",
-                "⚡ Process Monitor",
-                "🤖 System Sentinel",
-                "📄 File Integrity",
-                "📡 Network Radar",
-                "🔑 Identity Lab",
-                "🛡️ Security Logs",
+                "◻◻  Overview",
+                "∿  Process Monitor",
+                "▤  File Integrity",
+                "◉  Network Activity",
+                "⌁  Password Security",
+                "⎘  Auth Logs",
+                "⚙  System Config",
             ],
             label_visibility="collapsed",
         )
-        
-        neon_divider()
-        
-        st.markdown('''
-            <div style="padding:16px;color:#475569;font-size:0.75rem;text-align:center;">
-                Last full scan: Today {}<br>
-                <span style="color:#22c55e;">System secure</span>
+
+        st.markdown(
+            f'''
+            <div class="cg-sidebar-footer">
+                <div class="cg-footer-line1">Last scan: {get_time_only()}</div>
+                <div class="cg-footer-line2">System secure</div>
             </div>
-        '''.format(get_time_only()), unsafe_allow_html=True)
+            ''',
+            unsafe_allow_html=True,
+        )
 
         # On-demand Security Audit Report (stores latest in session for immediate download)
         if st.button("📄 Generate Security Audit Report", use_container_width=True):
@@ -1940,13 +2033,13 @@ def main():
     
     # Page routing
     PAGE_MAP = {
-        "📊 Overview": render_overview,
-        "⚡ Process Monitor": render_process_monitor,
-        "🤖 System Sentinel": render_system_sentinel,
-        "📄 File Integrity": render_file_integrity,
-        "📡 Network Radar": render_network_radar,
-        "🔑 Identity Lab": render_identity_lab,
-        "🛡️ Security Logs": render_security_logs,
+        "◻◻  Overview": render_overview,
+        "∿  Process Monitor": render_process_monitor,
+        "▤  File Integrity": render_file_integrity,
+        "◉  Network Activity": render_network_radar,
+        "⌁  Password Security": render_identity_lab,
+        "⎘  Auth Logs": render_security_logs,
+        "⚙  System Config": render_system_sentinel,
     }
     
     try:

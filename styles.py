@@ -5,6 +5,7 @@
 ╚══════════════════════════════════════════════════════════════╝
 """
 import streamlit as st
+import textwrap
 
 
 # ══════════════════════════════════════════════════════════════
@@ -35,55 +36,270 @@ CYBERGUARD_CSS = """
        SIDEBAR — Dark with teal accent
        ══════════════════════════════════════════════════════════ */
     section[data-testid="stSidebar"] {
-        background: #0f1629 !important;
+        background: #0b101e !important;
         border-right: 1px solid #1e293b;
         padding-top: 0 !important;
+        position: relative;
+        min-height: 100vh;
     }
     section[data-testid="stSidebar"] > div:first-child {
         padding-top: 0 !important;
+        padding-bottom: 110px !important;
+    }
+
+    .cg-brand-wrap {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 20px 16px 16px 16px;
+    }
+    .cg-brand-icon {
+        width: 44px;
+        height: 44px;
+        border-radius: 12px;
+        border: 1px solid rgba(34, 211, 238, 0.28);
+        color: #22d3ee;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.3rem;
+        box-shadow: 0 0 16px rgba(34, 211, 238, 0.15);
+    }
+    .cg-brand-title {
+        color: #f8fafc;
+        font-weight: 800;
+        letter-spacing: 0.05em;
+        font-size: 1.05rem;
+    }
+    .cg-brand-subtitle {
+        color: #64748b;
+        font-size: 0.78rem;
+        margin-top: 2px;
+    }
+
+    .cg-system-status {
+        margin: 4px 14px 0 14px;
+        padding: 12px 14px;
+        border-radius: 18px;
+        border: 1px solid rgba(34, 197, 94, 0.22);
+        background: linear-gradient(90deg, rgba(6, 78, 59, 0.55), rgba(6, 78, 59, 0.25));
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+    }
+    .cg-status-left {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+    }
+    .cg-status-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: #22c55e;
+        box-shadow: 0 0 12px rgba(34, 197, 94, 0.85);
+        flex-shrink: 0;
+    }
+    .cg-status-text {
+        color: #22c55e;
+        font-weight: 700;
+        font-size: 0.94rem;
+    }
+    .cg-status-time {
+        color: #94a3b8;
+        font-size: 0.86rem;
+        font-family: 'JetBrains Mono', monospace;
+        letter-spacing: 0.04em;
+        white-space: nowrap;
+    }
+
+    .cg-nav-label {
+        color: #64748b;
+        font-size: 0.88rem;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        margin: 8px 14px 8px 14px;
     }
     
     /* Sidebar navigation items */
     section[data-testid="stSidebar"] .stRadio label {
         color: #94a3b8 !important;
-        font-size: 0.9rem;
+        font-size: 1.02rem;
         font-weight: 500;
-        padding: 12px 16px;
-        border-radius: 8px;
+        padding: 13px 14px;
+        border-radius: 12px;
         transition: all 0.2s ease;
         display: flex;
         align-items: center;
-        gap: 12px;
-        margin: 2px 8px;
+        gap: 10px;
+        margin: 6px 10px;
+        border: 1px solid transparent;
+        position: relative;
+        overflow: visible;
     }
     section[data-testid="stSidebar"] .stRadio label:hover {
         color: #e2e8f0 !important;
         background: rgba(34, 211, 238, 0.08) !important;
     }
     section[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label[data-baseweb="radio"] {
-        padding: 12px 16px !important;
-        border-radius: 8px;
-        margin: 2px 0;
+        padding: 12px 0 !important;
+        border-radius: 12px;
+        margin: 0;
     }
     
     /* Active nav item */
     section[data-testid="stSidebar"] .stRadio div[data-checked="true"] label {
-        background: linear-gradient(90deg, rgba(34, 211, 238, 0.15) 0%, transparent 100%) !important;
+        background: linear-gradient(90deg, rgba(8, 145, 178, 0.2) 0%, rgba(15, 23, 42, 0.1) 100%) !important;
         color: #22d3ee !important;
-        border-left: 3px solid #22d3ee;
+        border: 1px solid #22d3ee !important;
+        box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25), inset 0 0 18px rgba(34, 211, 238, 0.08);
+    }
+
+    section[data-testid="stSidebar"] .stRadio div[data-checked="true"] label::before {
+        content: "";
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #22d3ee;
+        box-shadow: 0 0 10px rgba(34, 211, 238, 0.8);
+        position: absolute;
+        right: 12px;
     }
 
     /* Hide radio circles */
     section[data-testid="stSidebar"] .stRadio [data-testid="stMarkdownContainer"] {
         display: flex;
         align-items: center;
+        width: 100%;
+        justify-content: flex-start;
+    }
+
+    section[data-testid="stSidebar"] .stRadio input[type="radio"] {
+        display: none !important;
+    }
+
+    /* Auth Logs notification badge (6th item) */
+    section[data-testid="stSidebar"] .stRadio div[role="radiogroup"] > div:nth-child(6) label::after {
+        content: "3";
+        position: absolute;
+        right: 12px;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: #ef4444;
+        color: #ffffff;
+        font-size: 0.7rem;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 0 10px rgba(239, 68, 68, 0.6);
+    }
+
+    .cg-sidebar-footer {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 10px;
+        padding: 12px 16px;
+        text-align: center;
+        border-top: 1px solid #1e293b;
+        background: linear-gradient(180deg, rgba(11, 16, 30, 0), rgba(11, 16, 30, 0.96) 36%);
+    }
+    .cg-footer-line1 {
+        color: #64748b;
+        font-size: 0.84rem;
+        margin-bottom: 2px;
+    }
+    .cg-footer-line2 {
+        color: #22c55e;
+        font-weight: 600;
+        font-size: 0.9rem;
     }
     
-    /* Sidebar toggle */
-    button[data-testid="stSidebarCollapseButton"],
-    button[data-testid="stSidebarCollapsedControl"] {
-        color: #64748b !important;
+    /* Sidebar toggle - prominent style */
+    button[data-testid="stSidebarCollapseButton"] {
+        color: #94a3b8 !important;
         background: transparent !important;
+    }
+    
+    /* The control to open the sidebar when closed - Fixed Position */
+    button[data-testid="stSidebarCollapsedControl"],
+    [data-testid="stSidebarCollapsedControl"] {
+        color: #22d3ee !important;
+        background: linear-gradient(135deg, rgba(10, 20, 35, 0.9), rgba(12, 26, 46, 0.9)) !important;
+        border: 1px solid rgba(34, 211, 238, 0.25) !important;
+        border-radius: 50% !important;
+        width: 46px !important;
+        height: 46px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35), 0 0 14px rgba(34, 211, 238, 0.28) !important;
+        backdrop-filter: blur(6px);
+        transition: all 0.25s ease !important;
+        position: fixed !important;
+        top: 84px !important;
+        left: 14px !important;
+        z-index: 1000002 !important;
+        opacity: 1 !important;
+        visibility: visible !important;
+        pointer-events: auto !important;
+    }
+
+    button[data-testid="stSidebarCollapsedControl"]:hover,
+    [data-testid="stSidebarCollapsedControl"]:hover {
+        background: linear-gradient(135deg, rgba(12, 28, 50, 0.98), rgba(12, 40, 68, 0.98)) !important;
+        box-shadow: 0 12px 34px rgba(0, 0, 0, 0.45), 0 0 22px rgba(34, 211, 238, 0.48) !important;
+        transform: translateY(-2px) scale(1.05);
+        border-color: #22d3ee !important;
+    }
+    
+    /* Menu Label on Hover */
+    button[data-testid="stSidebarCollapsedControl"]::after,
+    [data-testid="stSidebarCollapsedControl"]::after {
+        content: "QUICK NAV";
+        position: absolute;
+        left: 55px; /* To the right of the button */
+        top: 50%;
+        transform: translateY(-50%);
+        background: #0f1629;
+        color: #22d3ee;
+        padding: 6px 10px;
+        border-radius: 8px;
+        font-size: 0.75rem;
+        font-weight: 700;
+        border: 1px solid rgba(34, 211, 238, 0.35);
+        opacity: 0;
+        transition: all 0.2s ease;
+        pointer-events: none;
+        white-space: nowrap;
+        box-shadow: 0 10px 24px rgba(0,0,0,0.35);
+    }
+    button[data-testid="stSidebarCollapsedControl"]:hover::after,
+    [data-testid="stSidebarCollapsedControl"]:hover::after {
+        opacity: 1;
+        left: 60px; /* Slide out effect */
+    }
+
+    /* ══════════════════════════════════════════════════════════
+       Streamlit Chrome adjustments
+       Keep header visible so collapsed sidebar control always renders.
+       ══════════════════════════════════════════════════════════ */
+    header[data-testid="stHeader"] {
+        background: transparent !important;
+        visibility: visible !important;
+        height: 0 !important;
+    }
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    
+    .stApp {
+        padding-top: 0 !important;
     }
 
     /* ══════════════════════════════════════════════════════════
@@ -715,11 +931,11 @@ def security_score_donut(score, safe_pct, warn_pct, crit_pct):
         ring_color = "#ef4444"
         status = "Critical"
     
-    return f'''
+    donut_html = textwrap.dedent(
+        f"""
         <div class="donut-container">
             <div class="donut-chart">
-                <div class="donut-ring" style="background: conic-gradient({ring_color} {score}%, #1e293b {score}%);">
-                </div>
+                <div class="donut-ring" style="background: conic-gradient({ring_color} {score}%, #1e293b {score}%);"></div>
                 <div class="donut-center" style="background: #111827; width: 80px; height: 80px; border-radius: 50%;">
                     <div class="donut-score">{score}</div>
                     <div class="donut-label">{status}</div>
@@ -749,7 +965,10 @@ def security_score_donut(score, safe_pct, warn_pct, crit_pct):
                 </div>
             </div>
         </div>
-    '''
+        """
+    ).strip()
+
+    return donut_html
 
 
 def alert_item(icon_type, title, meta):
